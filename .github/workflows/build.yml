@@ -28,6 +28,14 @@ jobs:
       - name: Build
         run: ./gradlew build --no-daemon
 
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mod-build
+          path: |
+            build/libs/*.jar
+            !build/libs/*-sources.jar
+
       - name: Inspect layered HUD API
         if: always()
         shell: bash
