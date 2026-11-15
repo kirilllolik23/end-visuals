@@ -28,9 +28,22 @@ jobs:
       - name: Build
         run: ./gradlew build --no-daemon
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mod-jars
-          path: build/libs/*.jar
-          if-no-files-found: error
+      - name: Find Forge GUI events
+        if: always()
+        shell: bash
+        run: |
+          echo "Searching Forge and generated Minecraft jars..."
+
+          find .gradle "$HOME/.gradle/caches" \
+            -type f -name '*.jar' -print0 2>/dev/null |
+          while IFS= read -r -d '' jar; do
+            matches=$(unzip -Z1 "$jar" 2>/dev/null |
+              grep -E '^net/minecraftforge/client/event/[^/]*(Gui|Overlay)[^/]*\.(class|java)$' |
+              head -100 || true)
+
+            if [ -n "$matches" ]; then
+              echo ""
+              echo "=== $jar ==="
+              echo "$matches"
+            fi
+          done
