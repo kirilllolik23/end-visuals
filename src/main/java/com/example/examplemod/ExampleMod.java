@@ -5,7 +5,6 @@ import com.google.gson.GsonBuilder;
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
@@ -268,7 +267,6 @@ public final class ExampleMod {
                     BACKGROUND
             );
 
-            // Фиолетовая полоска слева.
             graphics.fill(
                     x - 3,
                     y - 3,
@@ -441,138 +439,84 @@ public final class ExampleMod {
         }
 
         private int fpsColor(int fps) {
-            if (fps >= 100) return GREEN;
-            if (fps >= 50) return YELLOW;
+            if (fps >= 100) {
+                return GREEN;
+            }
+
+            if (fps >= 50) {
+                return YELLOW;
+            }
+
             return RED;
         }
 
         private int pingColor(int ping) {
-            if (ping <= 80) return GREEN;
-            if (ping <= 150) return YELLOW;
+            if (ping <= 80) {
+                return GREEN;
+            }
+
+            if (ping <= 150) {
+                return YELLOW;
+            }
+
             return RED;
         }
     }
 
     /**
-     * Простое меню End Visuals.
+     * Тёмное меню End Visuals с фиолетовыми переключателями.
      *
-     * Открывается на правый Shift и пока управляет тремя HUD-элементами.
-     * Кнопки используют стандартные виджеты Minecraft.
+     * Открывается на правый Shift. Пока управляет только уже
+     * реализованными HUD-функциями.
      */
     public static final class EndVisualsScreen extends Screen {
-        private static final int PANEL_BACKGROUND = 0xE0140B20;
-        private static final int PANEL_BORDER = 0xFF9D5CE8;
-        private static final int TITLE_COLOR = 0xFFE0C2FF;
-        private static final int TEXT_COLOR = 0xFFDDCBEA;
-        private static final int DIM_BACKGROUND = 0xB0000000;
+        private static final int DIM = 0xA0000000;
 
-        private static final int PANEL_WIDTH = 230;
-        private static final int PANEL_HEIGHT = 190;
+        private static final int PANEL = 0xF2100E17;
+        private static final int PANEL_BORDER = 0xFF292131;
+        private static final int TOP_BAR = 0xFF15121E;
+
+        private static final int CARD = 0xFF1C1925;
+        private static final int CARD_HOVER = 0xFF262132;
+
+        private static final int ACCENT = 0xFF8B5CF6;
+        private static final int ACCENT_LIGHT = 0xFFB99AFF;
+
+        private static final int TEXT = 0xFFEDE9F5;
+        private static final int TEXT_MUTED = 0xFF817A8D;
+        private static final int WHITE = 0xFFFFFFFF;
+
+        private static final int SWITCH_OFF = 0xFF393443;
+        private static final int SWITCH_KNOB_OFF = 0xFF77717E;
+
+        private static final int MAX_PANEL_WIDTH = 450;
+        private static final int PANEL_HEIGHT = 270;
+        private static final int HEADER_HEIGHT = 42;
+
+        private static final int TAB_VISUALS = 0;
+        private static final int TAB_HUD = 1;
+        private static final int TAB_UTILITIES = 2;
 
         private final HudSettings settings;
+
+        // Сначала открываем HUD, потому что существующие функции находятся там.
+        private int selectedTab = TAB_HUD;
 
         public EndVisualsScreen(HudSettings settings) {
             super(Component.literal("End Visuals"));
             this.settings = settings;
         }
 
-        @Override
-        protected void init() {
-            int panelX = (width - PANEL_WIDTH) / 2;
-            int panelY = (height - PANEL_HEIGHT) / 2;
-
-            int buttonX = panelX + 20;
-            int buttonWidth = PANEL_WIDTH - 40;
-            int buttonHeight = 20;
-            int startY = panelY + 52;
-
-            addRenderableWidget(
-                    Button.builder(
-                            toggleText("FPS / Ping", settings.fpsPing),
-                            button -> {
-                                settings.fpsPing = !settings.fpsPing;
-                                button.setMessage(
-                                        toggleText("FPS / Ping", settings.fpsPing)
-                                );
-                                ConfigManager.save(settings);
-                            }
-                    ).bounds(
-                            buttonX, startY, buttonWidth, buttonHeight
-                    ).build()
-            );
-
-            addRenderableWidget(
-                    Button.builder(
-                            toggleText("CPS Counter", settings.cps),
-                            button -> {
-                                settings.cps = !settings.cps;
-                                button.setMessage(
-                                        toggleText("CPS Counter", settings.cps)
-                                );
-                                ConfigManager.save(settings);
-                            }
-                    ).bounds(
-                            buttonX, startY + 24, buttonWidth, buttonHeight
-                    ).build()
-            );
-
-            addRenderableWidget(
-                    Button.builder(
-                            toggleText("Keystrokes", settings.keystrokes),
-                            button -> {
-                                settings.keystrokes = !settings.keystrokes;
-                                button.setMessage(
-                                        toggleText(
-                                                "Keystrokes",
-                                                settings.keystrokes
-                                        )
-                                );
-                                ConfigManager.save(settings);
-                            }
-                    ).bounds(
-                            buttonX, startY + 48, buttonWidth, buttonHeight
-                    ).build()
-            );
-
-            int bottomY = startY + 82;
-            int halfWidth = (buttonWidth - 4) / 2;
-
-            addRenderableWidget(
-                    Button.builder(
-                            Component.literal("Reset"),
-                            button -> {
-                                settings.fpsPing = true;
-                                settings.cps = true;
-                                settings.keystrokes = true;
-
-                                ConfigManager.save(settings);
-
-                                // Перестраиваем кнопки, чтобы обновить надписи.
-                                clearWidgets();
-                                init();
-                            }
-                    ).bounds(
-                            buttonX, bottomY, halfWidth, buttonHeight
-                    ).build()
-            );
-
-            addRenderableWidget(
-                    Button.builder(
-                            Component.literal("Done"),
-                            button -> onClose()
-                    ).bounds(
-                            buttonX + halfWidth + 4,
-                            bottomY,
-                            halfWidth,
-                            buttonHeight
-                    ).build()
-            );
+        private int panelWidth() {
+            return Math.max(1, Math.min(MAX_PANEL_WIDTH, width - 16));
         }
 
-        private static Component toggleText(String name, boolean enabled) {
-            return Component.literal(
-                    name + ": " + (enabled ? "ON" : "OFF")
-            );
+        private int panelX() {
+            return (width - panelWidth()) / 2;
+        }
+
+        private int panelY() {
+            return Math.max(4, (height - PANEL_HEIGHT) / 2);
         }
 
         @Override
@@ -582,60 +526,487 @@ public final class ExampleMod {
                 int mouseY,
                 float partialTick
         ) {
-            int panelX = (width - PANEL_WIDTH) / 2;
-            int panelY = (height - PANEL_HEIGHT) / 2;
+            int x = panelX();
+            int y = panelY();
+            int w = panelWidth();
 
-            graphics.fill(0, 0, width, height, DIM_BACKGROUND);
+            graphics.fill(0, 0, width, height, DIM);
 
-            // Рамка и фон панели.
             graphics.fill(
-                    panelX - 1,
-                    panelY - 1,
-                    panelX + PANEL_WIDTH + 1,
-                    panelY + PANEL_HEIGHT + 1,
+                    x - 1,
+                    y - 1,
+                    x + w + 1,
+                    y + PANEL_HEIGHT + 1,
                     PANEL_BORDER
             );
 
             graphics.fill(
-                    panelX,
-                    panelY,
-                    panelX + PANEL_WIDTH,
-                    panelY + PANEL_HEIGHT,
-                    PANEL_BACKGROUND
+                    x,
+                    y,
+                    x + w,
+                    y + PANEL_HEIGHT,
+                    PANEL
             );
 
-            // Звезда Незера — предмет Minecraft, отдельная текстура не нужна.
+            graphics.fill(
+                    x,
+                    y,
+                    x + w,
+                    y + HEADER_HEIGHT,
+                    TOP_BAR
+            );
+
             graphics.renderItem(
                     new ItemStack(Items.NETHER_STAR),
-                    panelX + 16,
-                    panelY + 13
+                    x + 12,
+                    y + 12
             );
 
             graphics.drawString(
                     font,
                     "End Visuals",
-                    panelX + 40,
-                    panelY + 17,
-                    TITLE_COLOR,
-                    true
+                    x + 34,
+                    y + 10,
+                    TEXT,
+                    false
             );
 
             graphics.drawString(
                     font,
-                    "HUD settings",
-                    panelX + 20,
-                    panelY + 38,
-                    TEXT_COLOR,
+                    "CLIENT",
+                    x + 34,
+                    y + 23,
+                    ACCENT_LIGHT,
                     false
             );
 
-            // Отрисовка стандартных кнопок и подсказок Minecraft.
-            super.render(graphics, mouseX, mouseY, partialTick);
+            int tabStartX = x + 130;
+
+            drawTab(
+                    graphics,
+                    "Visuals",
+                    tabStartX,
+                    y + 14,
+                    TAB_VISUALS,
+                    mouseX,
+                    mouseY
+            );
+
+            drawTab(
+                    graphics,
+                    "HUD",
+                    tabStartX + 58,
+                    y + 14,
+                    TAB_HUD,
+                    mouseX,
+                    mouseY
+            );
+
+            drawTab(
+                    graphics,
+                    "Utilities",
+                    tabStartX + 102,
+                    y + 14,
+                    TAB_UTILITIES,
+                    mouseX,
+                    mouseY
+            );
+
+            graphics.fill(
+                    x + 12,
+                    y + HEADER_HEIGHT,
+                    x + w - 12,
+                    y + HEADER_HEIGHT + 1,
+                    PANEL_BORDER
+            );
+
+            if (selectedTab == TAB_HUD) {
+                drawHudCards(graphics, mouseX, mouseY);
+            } else {
+                drawEmptyCategory(graphics);
+            }
+
+            graphics.drawString(
+                    font,
+                    "RIGHT SHIFT / ESC  -  Close",
+                    x + 14,
+                    y + PANEL_HEIGHT - 18,
+                    TEXT_MUTED,
+                    false
+            );
         }
 
-        /**
-         * Меню не ставит одиночную игру на паузу.
-         */
+        private void drawTab(
+                GuiGraphics graphics,
+                String label,
+                int x,
+                int y,
+                int tab,
+                int mouseX,
+                int mouseY
+        ) {
+            boolean selected = selectedTab == tab;
+            boolean hovered = isInside(
+                    mouseX,
+                    mouseY,
+                    x - 4,
+                    y - 5,
+                    font.width(label) + 8,
+                    20
+            );
+
+            int color = selected
+                    ? TEXT
+                    : hovered ? ACCENT_LIGHT : TEXT_MUTED;
+
+            graphics.drawString(font, label, x, y, color, false);
+
+            if (selected) {
+                graphics.fill(
+                        x,
+                        y + 13,
+                        x + font.width(label),
+                        y + 15,
+                        ACCENT
+                );
+            }
+        }
+
+        private void drawHudCards(
+                GuiGraphics graphics,
+                int mouseX,
+                int mouseY
+        ) {
+            int x = panelX();
+            int y = panelY();
+            int w = panelWidth();
+
+            graphics.drawString(
+                    font,
+                    "HUD MODULES",
+                    x + 14,
+                    y + 54,
+                    TEXT_MUTED,
+                    false
+            );
+
+            int gap = 8;
+            int cardX = x + 14;
+            int cardY = y + 72;
+            int availableWidth = w - 28;
+
+            boolean twoColumns = availableWidth >= 300;
+            int cardWidth = twoColumns
+                    ? (availableWidth - gap) / 2
+                    : availableWidth;
+
+            drawCard(
+                    graphics,
+                    "FPS / Ping",
+                    "Frame rate and latency",
+                    cardX,
+                    cardY,
+                    cardWidth,
+                    settings.fpsPing,
+                    mouseX,
+                    mouseY
+            );
+
+            int secondX = twoColumns
+                    ? cardX + cardWidth + gap
+                    : cardX;
+
+            int secondY = twoColumns
+                    ? cardY
+                    : cardY + 42;
+
+            drawCard(
+                    graphics,
+                    "CPS Counter",
+                    "Mouse clicks per second",
+                    secondX,
+                    secondY,
+                    cardWidth,
+                    settings.cps,
+                    mouseX,
+                    mouseY
+            );
+
+            int thirdY = twoColumns
+                    ? cardY + 42
+                    : cardY + 84;
+
+            drawCard(
+                    graphics,
+                    "Keystrokes",
+                    "Movement and mouse keys",
+                    cardX,
+                    thirdY,
+                    cardWidth,
+                    settings.keystrokes,
+                    mouseX,
+                    mouseY
+            );
+
+            graphics.drawString(
+                    font,
+                    "Click a card to toggle it.",
+                    cardX,
+                    y + 220,
+                    TEXT_MUTED,
+                    false
+            );
+        }
+
+        private void drawCard(
+                GuiGraphics graphics,
+                String name,
+                String description,
+                int x,
+                int y,
+                int cardWidth,
+                boolean enabled,
+                int mouseX,
+                int mouseY
+        ) {
+            int cardHeight = 34;
+
+            boolean hovered = isInside(
+                    mouseX,
+                    mouseY,
+                    x,
+                    y,
+                    cardWidth,
+                    cardHeight
+            );
+
+            graphics.fill(
+                    x,
+                    y,
+                    x + cardWidth,
+                    y + cardHeight,
+                    hovered ? CARD_HOVER : CARD
+            );
+
+            graphics.drawString(
+                    font,
+                    name,
+                    x + 10,
+                    y + 6,
+                    TEXT,
+                    false
+            );
+
+            int maxTextWidth = Math.max(0, cardWidth - 42);
+            String trimmedDescription = trimToWidth(description, maxTextWidth);
+
+            graphics.drawString(
+                    font,
+                    trimmedDescription,
+                    x + 10,
+                    y + 19,
+                    TEXT_MUTED,
+                    false
+            );
+
+            drawSwitch(
+                    graphics,
+                    x + cardWidth - 29,
+                    y + 11,
+                    enabled
+            );
+        }
+
+        private String trimToWidth(String text, int maxWidth) {
+            if (font.width(text) <= maxWidth) {
+                return text;
+            }
+
+            String ellipsis = "...";
+            int ellipsisWidth = font.width(ellipsis);
+
+            if (maxWidth <= ellipsisWidth) {
+                return "";
+            }
+
+            StringBuilder builder = new StringBuilder();
+
+            for (int i = 0; i < text.length(); i++) {
+                String next = builder.toString() + text.charAt(i);
+
+                if (font.width(next) + ellipsisWidth > maxWidth) {
+                    break;
+                }
+
+                builder.append(text.charAt(i));
+            }
+
+            return builder + ellipsis;
+        }
+
+        private void drawSwitch(
+                GuiGraphics graphics,
+                int x,
+                int y,
+                boolean enabled
+        ) {
+            int trackColor = enabled ? ACCENT : SWITCH_OFF;
+            int knobColor = enabled ? WHITE : SWITCH_KNOB_OFF;
+
+            graphics.fill(x + 2, y, x + 19, y + 12, trackColor);
+            graphics.fill(x, y + 2, x + 21, y + 10, trackColor);
+
+            int knobX = enabled ? x + 12 : x + 2;
+
+            graphics.fill(
+                    knobX + 1,
+                    y + 2,
+                    knobX + 7,
+                    y + 10,
+                    knobColor
+            );
+
+            graphics.fill(
+                    knobX,
+                    y + 3,
+                    knobX + 8,
+                    y + 9,
+                    knobColor
+            );
+        }
+
+        private void drawEmptyCategory(GuiGraphics graphics) {
+            int x = panelX();
+            int y = panelY();
+
+            String title = selectedTab == TAB_VISUALS
+                    ? "VISUALS"
+                    : "UTILITIES";
+
+            graphics.drawString(
+                    font,
+                    title,
+                    x + 14,
+                    y + 54,
+                    TEXT_MUTED,
+                    false
+            );
+
+            graphics.drawString(
+                    font,
+                    "Modules coming soon",
+                    x + 14,
+                    y + 78,
+                    TEXT,
+                    false
+            );
+
+            graphics.drawString(
+                    font,
+                    "This category is not implemented yet.",
+                    x + 14,
+                    y + 93,
+                    TEXT_MUTED,
+                    false
+            );
+        }
+
+        @Override
+        public boolean mouseClicked(double mouseX, double mouseY, int button) {
+            if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+                return super.mouseClicked(mouseX, mouseY, button);
+            }
+
+            int x = panelX();
+            int y = panelY();
+            int tabStartX = x + 130;
+
+            if (isInside(mouseX, mouseY, tabStartX - 4, y + 9, 55, 20)) {
+                selectedTab = TAB_VISUALS;
+                return true;
+            }
+
+            if (isInside(mouseX, mouseY, tabStartX + 54, y + 9, 40, 20)) {
+                selectedTab = TAB_HUD;
+                return true;
+            }
+
+            if (isInside(mouseX, mouseY, tabStartX + 98, y + 9, 64, 20)) {
+                selectedTab = TAB_UTILITIES;
+                return true;
+            }
+
+            if (selectedTab != TAB_HUD) {
+                return super.mouseClicked(mouseX, mouseY, button);
+            }
+
+            int gap = 8;
+            int cardX = x + 14;
+            int cardY = y + 72;
+            int availableWidth = panelWidth() - 28;
+
+            boolean twoColumns = availableWidth >= 300;
+            int cardWidth = twoColumns
+                    ? (availableWidth - gap) / 2
+                    : availableWidth;
+
+            int secondX = twoColumns
+                    ? cardX + cardWidth + gap
+                    : cardX;
+
+            int secondY = twoColumns
+                    ? cardY
+                    : cardY + 42;
+
+            int thirdY = twoColumns
+                    ? cardY + 42
+                    : cardY + 84;
+
+            if (isInside(mouseX, mouseY, cardX, cardY, cardWidth, 34)) {
+                settings.fpsPing = !settings.fpsPing;
+                ConfigManager.save(settings);
+                return true;
+            }
+
+            if (isInside(mouseX, mouseY, secondX, secondY, cardWidth, 34)) {
+                settings.cps = !settings.cps;
+                ConfigManager.save(settings);
+                return true;
+            }
+
+            if (isInside(mouseX, mouseY, cardX, thirdY, cardWidth, 34)) {
+                settings.keystrokes = !settings.keystrokes;
+                ConfigManager.save(settings);
+                return true;
+            }
+
+            return super.mouseClicked(mouseX, mouseY, button);
+        }
+
+        @Override
+        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+            if (keyCode == GLFW.GLFW_KEY_RIGHT_SHIFT) {
+                onClose();
+                return true;
+            }
+
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+
+        private boolean isInside(
+                double mouseX,
+                double mouseY,
+                int x,
+                int y,
+                int boxWidth,
+                int boxHeight
+        ) {
+            return mouseX >= x
+                    && mouseX < x + boxWidth
+                    && mouseY >= y
+                    && mouseY < y + boxHeight;
+        }
+
         @Override
         public boolean isPauseScreen() {
             return false;
