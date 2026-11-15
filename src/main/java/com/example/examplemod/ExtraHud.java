@@ -15,14 +15,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Дополнительные визуальные HUD-элементы End Visuals.
+ * Дополнительные клиентские HUD-элементы End Visuals.
  *
- * Всё отображается только на клиенте:
- * - координаты, направление и биом;
- * - прочность брони и предмета в основной руке;
- * - активные эффекты и их время.
- *
- * Класс не отправляет пакеты и не управляет игроком.
+ * Видимость и масштаб каждого элемента управляются из меню.
+ * Позиции автоматически складываются в правый столбец.
  */
 public final class ExtraHud {
     private static final int PANEL = 0xB0181028;
@@ -37,10 +33,14 @@ public final class ExtraHud {
 
     private static final int PANEL_WIDTH = 150;
     private static final int MARGIN = 8;
+    private static final int GAP = 5;
 
-    /**
-     * Регистрирует отдельный слой HUD на шине мода.
-     */
+    private final ExampleMod.HudSettings settings;
+
+    public ExtraHud(ExampleMod.HudSettings settings) {
+        this.settings = settings;
+    }
+
     public void onAddGuiLayers(AddGuiOverlayLayersEvent event) {
         event.getLayeredDraw().add(
                 ResourceLocation.fromNamespaceAndPath(
@@ -61,31 +61,89 @@ public final class ExtraHud {
         int screenWidth = graphics.guiWidth();
         int screenHeight = graphics.guiHeight();
 
-        // На очень маленьком экране не рисуем панели за его границами.
-        if (screenWidth < PANEL_WIDTH + MARGIN * 2 || screenHeight < 80) {
-            return;
-        }
-
-        int x = screenWidth - PANEL_WIDTH - MARGIN;
         int y = MARGIN;
 
-        y = drawCoordinates(graphics, mc, x, y);
-        y += 6;
+        if (settings.coordinates) {
+            int scale = settings.coordinatesScale;
+            int x = rightAlignedX(screenWidth, scale);
 
-        y = drawArmor(graphics, mc, x, y);
-        y += 6;
+            pushScaled(graphics, x, y, scale);
+            try {
+                drawCoordinates(graphics, mc);
+            } finally {
+                graphics.pose().popPose();
+            }
 
-        drawPotions(graphics, mc, x, y, screenHeight - MARGIN);
+            y += scaledHeight(57, scale) + GAP;
+        }
+
+        if (settings.armor) {
+            List<ItemStack> items = collectEquipment(mc);
+            int height = armorHeight(items.size());
+            int scale = settings.armorScale;
+            int x = rightAlignedX(screenWidth, scale);
+
+            pushScaled(graphics, x, y, scale);
+            try {
+                drawArmor(graphics, mc, items);
+            } finally {
+                graphics.pose().popPose();
+            }
+
+            y += scaledHeight(height, scale) + GAP;
+        }
+
+        if (settings.potions && !mc.player.getActiveEffects().isEmpty()) {
+            int scale = settings.potionsScale;
+            int x = rightAlignedX(screenWidth, scale);
+
+            int availablePixels = screenHeight - MARGIN - y;
+
+            if (availablePixels <= 0) {
+                return;
+            }
+
+            int availableLogicalHeight = (int) Math.floor(
+                    availablePixels / (scale / 100.0f)
+            );
+
+            pushScaled(graphics, x, y, scale);
+            try {
+                drawPotions(graphics, mc, availableLogicalHeight);
+            } finally {
+                graphics.pose().popPose();
+            }
+        }
     }
 
-    /**
-     * Координаты, сторона света и биом текущего блока игрока.
-     */
-    private int drawCoordinates(
+    private int rightAlignedX(int screenWidth, int scale) {
+        int scaledWidth = (int) Math.ceil(
+                PANEL_WIDTH * scale / 100.0
+        );
+
+        return Math.max(MARGIN, screenWidth - MARGIN - scaledWidth);
+    }
+
+    private int scaledHeight(int height, int scale) {
+        return (int) Math.ceil(height * scale / 100.0);
+    }
+
+    private void pushScaled(
             GuiGraphics graphics,
-            Minecraft mc,
             int x,
-            int y
+            int y,
+            int percent
+    ) {
+        float scale = percent / 100.0f;
+
+        graphics.pose().pushPose();
+        graphics.pose().translate(x, y, 0);
+        graphics.pose().scale(scale, scale, 1.0f);
+    }
+
+    private void drawCoordinates(
+            GuiGraphics graphics,
+            Minecraft mc
     ) {
         LocalPlayer player = mc.player;
         BlockPos pos = player.blockPosition();
@@ -105,19 +163,16 @@ public final class ExtraHud {
         String biome = mc.level.getBiome(pos)
                 .unwrapKey()
                 .map(key -> key.location().getPath())
-                .orElse("unknown");
+                .orElse("unknown")
+                .replace('_', ' ');
 
-        biome = biome.replace('_', ' ');
-
-        int height = 57;
-
-        drawPanel(graphics, x, y, PANEL_WIDTH, height);
+        drawPanel(graphics, 0, 0, PANEL_WIDTH, 57);
 
         graphics.drawString(
                 mc.font,
                 "LOCATION",
-                x + 8,
-                y + 6,
+                8,
+                6,
                 TITLE,
                 false
         );
@@ -126,8 +181,8 @@ public final class ExtraHud {
                 graphics,
                 mc,
                 coordinates,
-                x + 8,
-                y + 20,
+                8,
+                20,
                 PANEL_WIDTH - 16,
                 TEXT
         );
@@ -135,8 +190,8 @@ public final class ExtraHud {
         graphics.drawString(
                 mc.font,
                 "Facing: " + direction,
-                x + 8,
-                y + 31,
+                8,
+                31,
                 TEXT,
                 false
         );
@@ -145,24 +200,14 @@ public final class ExtraHud {
                 graphics,
                 mc,
                 "Biome: " + biome,
-                x + 8,
-                y + 42,
+                8,
+                42,
                 PANEL_WIDTH - 16,
                 MUTED
         );
-
-        return y + height;
     }
 
-    /**
-     * Показывает прочность надетой брони и предмета в основной руке.
-     */
-    private int drawArmor(
-            GuiGraphics graphics,
-            Minecraft mc,
-            int x,
-            int y
-    ) {
+    private List<ItemStack> collectEquipment(Minecraft mc) {
         List<ItemStack> items = new ArrayList<>();
 
         for (ItemStack stack : mc.player.getArmorSlots()) {
@@ -177,16 +222,27 @@ public final class ExtraHud {
             items.add(mainHand);
         }
 
-        int rowHeight = 21;
-        int height = 22 + Math.max(1, items.size()) * rowHeight;
+        return items;
+    }
 
-        drawPanel(graphics, x, y, PANEL_WIDTH, height);
+    private int armorHeight(int itemCount) {
+        return 22 + Math.max(1, itemCount) * 21;
+    }
+
+    private void drawArmor(
+            GuiGraphics graphics,
+            Minecraft mc,
+            List<ItemStack> items
+    ) {
+        int height = armorHeight(items.size());
+
+        drawPanel(graphics, 0, 0, PANEL_WIDTH, height);
 
         graphics.drawString(
                 mc.font,
                 "ARMOR / TOOL",
-                x + 8,
-                y + 6,
+                8,
+                6,
                 TITLE,
                 false
         );
@@ -195,23 +251,20 @@ public final class ExtraHud {
             graphics.drawString(
                     mc.font,
                     "No equipment",
-                    x + 8,
-                    y + 23,
+                    8,
+                    23,
                     MUTED,
                     false
             );
-
-            return y + height;
+            return;
         }
 
-        int rowY = y + 20;
+        int rowY = 20;
 
         for (ItemStack stack : items) {
-            drawEquipmentRow(graphics, mc, stack, x + 7, rowY);
-            rowY += rowHeight;
+            drawEquipmentRow(graphics, mc, stack, 7, rowY);
+            rowY += 21;
         }
-
-        return y + height;
     }
 
     private void drawEquipmentRow(
@@ -247,8 +300,6 @@ public final class ExtraHud {
                 Math.min(1.0f, (float) remaining / max)
         );
 
-        int color = durabilityColor(fraction);
-
         String label = remaining + " / " + max
                 + " (" + Math.round(fraction * 100.0f) + "%)";
 
@@ -278,49 +329,42 @@ public final class ExtraHud {
                 barY,
                 textX + Math.round(barWidth * fraction),
                 barY + 3,
-                color
+                durabilityColor(fraction)
         );
     }
 
-    /**
-     * Показывает эффекты, которые помещаются на экране.
-     */
     private void drawPotions(
             GuiGraphics graphics,
             Minecraft mc,
-            int x,
-            int y,
-            int bottomLimit
+            int availableHeight
     ) {
-        if (mc.player.getActiveEffects().isEmpty()) {
-            return;
-        }
-
-        int rowHeight = 12;
-        int availableHeight = bottomLimit - y;
-
         if (availableHeight < 34) {
             return;
         }
 
+        int rowHeight = 12;
         int maxRows = (availableHeight - 22) / rowHeight;
         int totalEffects = mc.player.getActiveEffects().size();
         int visibleRows = Math.min(totalEffects, maxRows);
 
+        if (visibleRows <= 0) {
+            return;
+        }
+
         int height = 22 + visibleRows * rowHeight;
 
-        drawPanel(graphics, x, y, PANEL_WIDTH, height);
+        drawPanel(graphics, 0, 0, PANEL_WIDTH, height);
 
         graphics.drawString(
                 mc.font,
                 "POTION EFFECTS",
-                x + 8,
-                y + 6,
+                8,
+                6,
                 TITLE,
                 false
         );
 
-        int rowY = y + 20;
+        int rowY = 20;
         int rendered = 0;
 
         for (MobEffectInstance effect : mc.player.getActiveEffects()) {
@@ -346,7 +390,7 @@ public final class ExtraHud {
                     graphics,
                     mc,
                     effectName,
-                    x + 8,
+                    8,
                     rowY,
                     Math.max(0, nameWidth),
                     TEXT
@@ -355,7 +399,7 @@ public final class ExtraHud {
             graphics.drawString(
                     mc.font,
                     time,
-                    x + PANEL_WIDTH - 8 - timeWidth,
+                    PANEL_WIDTH - 8 - timeWidth,
                     rowY,
                     ACCENT,
                     false
@@ -384,14 +428,8 @@ public final class ExtraHud {
     }
 
     private int durabilityColor(float fraction) {
-        if (fraction > 0.5f) {
-            return GREEN;
-        }
-
-        if (fraction > 0.2f) {
-            return YELLOW;
-        }
-
+        if (fraction > 0.5f) return GREEN;
+        if (fraction > 0.2f) return YELLOW;
         return RED;
     }
 

@@ -14,6 +14,7 @@ import net.minecraft.world.item.Items;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.AddGuiOverlayLayersEvent;
 import net.minecraftforge.client.event.InputEvent;
+import net.minecraftforge.client.gui.overlay.ForgeLayeredDraw;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -38,8 +39,10 @@ public final class ExampleMod {
 
     public ExampleMod() {
         if (FMLEnvironment.dist == Dist.CLIENT) {
-            ClientHud hud = new ClientHud();
-            ExtraHud extraHud = new ExtraHud();
+            HudSettings settings = ConfigManager.load();
+
+            ClientHud hud = new ClientHud(settings);
+            ExtraHud extraHud = new ExtraHud(settings);
 
             MinecraftForge.EVENT_BUS.register(hud);
 
@@ -54,18 +57,107 @@ public final class ExampleMod {
     }
 
     /**
-     * Настройки первого набора HUD-элементов.
+     * Настройки визуальных элементов.
      *
-     * Позднее этот класс можно заменить полноценной системой Setting.
+     * Старые настройки fpsPing, cps и keystrokes сохраняют свои имена,
+     * поэтому их значения будут прочитаны из предыдущего конфига.
      */
     public static final class HudSettings {
         public boolean fpsPing = true;
         public boolean cps = true;
         public boolean keystrokes = true;
+
+        public boolean coordinates = true;
+        public boolean armor = true;
+        public boolean potions = true;
+
+        public boolean crosshair = false;
+
+        public int fpsPingScale = 70;
+        public int cpsScale = 70;
+        public int keystrokesScale = 70;
+
+        public int coordinatesScale = 70;
+        public int armorScale = 70;
+        public int potionsScale = 70;
+
+        public int crosshairScale = 100;
+
+        public void normalize() {
+            fpsPingScale = clampScale(fpsPingScale);
+            cpsScale = clampScale(cpsScale);
+            keystrokesScale = clampScale(keystrokesScale);
+
+            coordinatesScale = clampScale(coordinatesScale);
+            armorScale = clampScale(armorScale);
+            potionsScale = clampScale(potionsScale);
+
+            crosshairScale = clampScale(crosshairScale);
+        }
+
+        private static int clampScale(int value) {
+            return Math.max(50, Math.min(150, value));
+        }
+
+        public boolean isEnabled(int id) {
+            return switch (id) {
+                case 0 -> fpsPing;
+                case 1 -> cps;
+                case 2 -> keystrokes;
+                case 3 -> coordinates;
+                case 4 -> armor;
+                case 5 -> potions;
+                case 6 -> crosshair;
+                default -> false;
+            };
+        }
+
+        public void setEnabled(int id, boolean enabled) {
+            switch (id) {
+                case 0 -> fpsPing = enabled;
+                case 1 -> cps = enabled;
+                case 2 -> keystrokes = enabled;
+                case 3 -> coordinates = enabled;
+                case 4 -> armor = enabled;
+                case 5 -> potions = enabled;
+                case 6 -> crosshair = enabled;
+                default -> {
+                }
+            }
+        }
+
+        public int getScale(int id) {
+            return switch (id) {
+                case 0 -> fpsPingScale;
+                case 1 -> cpsScale;
+                case 2 -> keystrokesScale;
+                case 3 -> coordinatesScale;
+                case 4 -> armorScale;
+                case 5 -> potionsScale;
+                case 6 -> crosshairScale;
+                default -> 100;
+            };
+        }
+
+        public void setScale(int id, int value) {
+            int scale = clampScale(value);
+
+            switch (id) {
+                case 0 -> fpsPingScale = scale;
+                case 1 -> cpsScale = scale;
+                case 2 -> keystrokesScale = scale;
+                case 3 -> coordinatesScale = scale;
+                case 4 -> armorScale = scale;
+                case 5 -> potionsScale = scale;
+                case 6 -> crosshairScale = scale;
+                default -> {
+                }
+            }
+        }
     }
 
     /**
-     * Загрузка и сохранение настроек клиента в JSON.
+     * Сохранение клиентских настроек в config/endvisuals.json.
      */
     public static final class ConfigManager {
         private static final Gson GSON = new GsonBuilder()
@@ -90,16 +182,24 @@ public final class ExampleMod {
             }
 
             try {
-                String json = Files.readString(path, StandardCharsets.UTF_8);
-                HudSettings settings = GSON.fromJson(json, HudSettings.class);
+                String json = Files.readString(
+                        path,
+                        StandardCharsets.UTF_8
+                );
+
+                HudSettings settings = GSON.fromJson(
+                        json,
+                        HudSettings.class
+                );
 
                 if (settings == null) {
                     LOGGER.warn(
-                            "End Visuals config is empty; using default settings."
+                            "End Visuals config is empty; using defaults."
                     );
                     return new HudSettings();
                 }
 
+                settings.normalize();
                 return settings;
             } catch (Exception exception) {
                 LOGGER.error(
@@ -114,7 +214,9 @@ public final class ExampleMod {
             Path path = getConfigPath();
 
             try {
+                settings.normalize();
                 Files.createDirectories(path.getParent());
+
                 Files.writeString(
                         path,
                         GSON.toJson(settings),
@@ -131,17 +233,11 @@ public final class ExampleMod {
     }
 
     /**
-     * Временный менеджер HUD и обработчик клиентского ввода.
+     * Счётчики и левый столбец HUD.
      *
-     * Счётчик CPS учитывает физические нажатия мыши, а не
-     * подтверждённые сервером удары.
+     * CPS считает физические нажатия мыши, а не подтверждённые удары.
      */
     public static final class ClientHud {
-        private final Deque<Long> leftClicks = new ArrayDeque<>();
-        private final Deque<Long> rightClicks = new ArrayDeque<>();
-
-        private final HudSettings settings;
-
         private static final long CPS_WINDOW_MS = 1_000L;
 
         private static final int WHITE = 0xFFFFFFFF;
@@ -155,15 +251,28 @@ public final class ExampleMod {
         private static final int KEY_PRESSED = 0xD0C18AFF;
         private static final int KEY_TEXT_PRESSED = 0xFF1A0D29;
 
-        public ClientHud() {
-            settings = ConfigManager.load();
+        private final Deque<Long> leftClicks = new ArrayDeque<>();
+        private final Deque<Long> rightClicks = new ArrayDeque<>();
+
+        private final HudSettings settings;
+
+        public ClientHud(HudSettings settings) {
+            this.settings = settings;
         }
 
         /**
-         * Регистрирует слой HUD через API Forge 1.21.4.
+         * Регистрируем HUD и условие отображения ванильного прицела.
          */
         public void onAddGuiLayers(AddGuiOverlayLayersEvent event) {
-            event.getLayeredDraw().add(
+            ForgeLayeredDraw layeredDraw = event.getLayeredDraw();
+
+            layeredDraw.addConditionTo(
+                    ForgeLayeredDraw.PRE_SLEEP_STACK,
+                    ForgeLayeredDraw.CROSSHAIR,
+                    () -> !settings.crosshair
+            );
+
+            layeredDraw.add(
                     ResourceLocation.fromNamespaceAndPath(
                             ExampleMod.MOD_ID,
                             "client_hud"
@@ -172,21 +281,12 @@ public final class ExampleMod {
             );
         }
 
-        /**
-         * Открывает меню на правый Shift, когда другой экран не открыт.
-         *
-         * Если правый Shift назначен действию Minecraft или другого мода,
-         * возможен конфликт. Редактор привязок добавим отдельно.
-         */
         @SubscribeEvent
         public void onKey(InputEvent.Key event) {
             Minecraft mc = Minecraft.getInstance();
 
-            if (event.getKey() != GLFW.GLFW_KEY_RIGHT_SHIFT) {
-                return;
-            }
-
-            if (event.getAction() != GLFW.GLFW_PRESS) {
+            if (event.getKey() != GLFW.GLFW_KEY_RIGHT_SHIFT
+                    || event.getAction() != GLFW.GLFW_PRESS) {
                 return;
             }
 
@@ -244,136 +344,147 @@ public final class ExampleMod {
                 return;
             }
 
-            drawStats(graphics, mc, 8, 8);
-
-            if (settings.keystrokes) {
-                drawKeystrokes(graphics, mc, 8, 50);
-            }
-        }
-
-        private void drawStats(
-                GuiGraphics graphics,
-                Minecraft mc,
-                int x,
-                int y
-        ) {
-            if (!settings.fpsPing && !settings.cps) {
-                return;
-            }
-
-            int height = settings.fpsPing && settings.cps ? 32 : 18;
-            int panelWidth = 150;
-
-            graphics.fill(
-                    x - 3,
-                    y - 3,
-                    x + panelWidth,
-                    y + height,
-                    BACKGROUND
-            );
-
-            graphics.fill(
-                    x - 3,
-                    y - 3,
-                    x - 1,
-                    y + height,
-                    ACCENT
-            );
-
-            int currentY = y;
+            int y = 8;
 
             if (settings.fpsPing) {
-                int fps = mc.getFps();
-                int ping = getPing(mc);
+                int scale = settings.fpsPingScale;
 
-                graphics.drawString(
-                        mc.font,
-                        "FPS: " + fps,
-                        x + 2,
-                        currentY,
-                        fpsColor(fps),
-                        true
-                );
+                pushScaled(graphics, 8, y, scale);
+                try {
+                    drawFpsPing(graphics, mc);
+                } finally {
+                    graphics.pose().popPose();
+                }
 
-                graphics.drawString(
-                        mc.font,
-                        "Ping: " + (ping < 0 ? "N/A" : ping + " ms"),
-                        x + 70,
-                        currentY,
-                        ping < 0 ? WHITE : pingColor(ping),
-                        true
-                );
-
-                currentY += 14;
+                y += scaledHeight(20, scale) + 4;
             }
 
             if (settings.cps) {
-                int left = leftClicks.size();
-                int right = rightClicks.size();
+                int scale = settings.cpsScale;
 
-                graphics.drawString(
-                        mc.font,
-                        "CPS L/R: " + left + "/" + right
-                                + " | Total: " + (left + right),
-                        x + 2,
-                        currentY,
-                        WHITE,
-                        true
-                );
+                pushScaled(graphics, 8, y, scale);
+                try {
+                    drawCps(graphics, mc);
+                } finally {
+                    graphics.pose().popPose();
+                }
+
+                y += scaledHeight(20, scale) + 4;
+            }
+
+            if (settings.keystrokes) {
+                int scale = settings.keystrokesScale;
+
+                pushScaled(graphics, 8, y, scale);
+                try {
+                    drawKeystrokes(graphics, mc);
+                } finally {
+                    graphics.pose().popPose();
+                }
+            }
+
+            if (settings.crosshair
+                    && mc.options.getCameraType().isFirstPerson()) {
+                drawCrosshair(graphics);
             }
         }
 
-        private void drawKeystrokes(
+        private void drawFpsPing(GuiGraphics graphics, Minecraft mc) {
+            int fps = mc.getFps();
+            int ping = getPing(mc);
+
+            drawPanel(graphics, 150, 20);
+
+            graphics.drawString(
+                    mc.font,
+                    "FPS: " + fps,
+                    6,
+                    6,
+                    fpsColor(fps),
+                    true
+            );
+
+            graphics.drawString(
+                    mc.font,
+                    "Ping: " + (ping < 0 ? "N/A" : ping + " ms"),
+                    76,
+                    6,
+                    ping < 0 ? WHITE : pingColor(ping),
+                    true
+            );
+        }
+
+        private void drawCps(GuiGraphics graphics, Minecraft mc) {
+            int left = leftClicks.size();
+            int right = rightClicks.size();
+
+            drawPanel(graphics, 150, 20);
+
+            graphics.drawString(
+                    mc.font,
+                    "CPS L/R: " + left + "/" + right
+                            + " | Total: " + (left + right),
+                    6,
+                    6,
+                    WHITE,
+                    true
+            );
+        }
+
+        private void drawPanel(
                 GuiGraphics graphics,
-                Minecraft mc,
-                int x,
-                int y
+                int width,
+                int height
         ) {
+            graphics.fill(0, 0, width, height, BACKGROUND);
+            graphics.fill(0, 0, 2, height, ACCENT);
+        }
+
+        private void drawKeystrokes(GuiGraphics graphics, Minecraft mc) {
             int size = 20;
             int gap = 2;
 
             drawKey(
                     graphics, mc, "W",
-                    x + size + gap, y,
+                    size + gap, 0,
                     size, size,
                     mc.options.keyUp.isDown()
             );
 
             drawKey(
                     graphics, mc, "A",
-                    x, y + size + gap,
+                    0, size + gap,
                     size, size,
                     mc.options.keyLeft.isDown()
             );
 
             drawKey(
                     graphics, mc, "S",
-                    x + size + gap, y + size + gap,
+                    size + gap, size + gap,
                     size, size,
                     mc.options.keyDown.isDown()
             );
 
             drawKey(
                     graphics, mc, "D",
-                    x + 2 * (size + gap), y + size + gap,
+                    2 * (size + gap), size + gap,
                     size, size,
                     mc.options.keyRight.isDown()
             );
 
-            int mouseY = y + 2 * (size + gap);
-            int mouseWidth = 31;
+            int mouseY = 2 * (size + gap);
 
             drawKey(
                     graphics, mc, "LMB",
-                    x, mouseY,
-                    mouseWidth, size,
+                    0, mouseY,
+                    31, size,
                     mc.options.keyAttack.isDown()
             );
 
             drawKey(
                     graphics, mc, "RMB",
-                    x + mouseWidth + gap, mouseY,
-                    mouseWidth, size,
+                    33, mouseY,
+                    31, size,
                     mc.options.keyUse.isDown()
             );
 
@@ -381,14 +492,14 @@ public final class ExampleMod {
 
             drawKey(
                     graphics, mc, "SPACE",
-                    x, bottomY,
+                    0, bottomY,
                     42, size,
                     mc.options.keyJump.isDown()
             );
 
             drawKey(
                     graphics, mc, "SHIFT",
-                    x + 44, bottomY,
+                    44, bottomY,
                     42, size,
                     mc.options.keyShift.isDown()
             );
@@ -425,6 +536,51 @@ public final class ExampleMod {
             );
         }
 
+        /**
+         * Простой фиолетовый прицел. Это только отрисовка:
+         * дальность взаимодействия и попадания не изменяются.
+         */
+        private void drawCrosshair(GuiGraphics graphics) {
+            int centerX = graphics.guiWidth() / 2;
+            int centerY = graphics.guiHeight() / 2;
+
+            float scale = settings.crosshairScale / 100.0f;
+
+            graphics.pose().pushPose();
+            try {
+                graphics.pose().translate(centerX, centerY, 0);
+                graphics.pose().scale(scale, scale, 1.0f);
+
+                int color = 0xFFD5A6FF;
+
+                // Четыре линии и точка в центре.
+                graphics.fill(-1, -7, 1, -2, color);
+                graphics.fill(-1, 3, 1, 8, color);
+                graphics.fill(-7, -1, -2, 1, color);
+                graphics.fill(3, -1, 8, 1, color);
+                graphics.fill(0, 0, 1, 1, WHITE);
+            } finally {
+                graphics.pose().popPose();
+            }
+        }
+
+        private void pushScaled(
+                GuiGraphics graphics,
+                int x,
+                int y,
+                int percent
+        ) {
+            float scale = percent / 100.0f;
+
+            graphics.pose().pushPose();
+            graphics.pose().translate(x, y, 0);
+            graphics.pose().scale(scale, scale, 1.0f);
+        }
+
+        private int scaledHeight(int height, int percent) {
+            return (int) Math.ceil(height * percent / 100.0);
+        }
+
         private int getPing(Minecraft mc) {
             if (mc.getConnection() == null || mc.player == null) {
                 return -1;
@@ -444,35 +600,23 @@ public final class ExampleMod {
         }
 
         private int fpsColor(int fps) {
-            if (fps >= 100) {
-                return GREEN;
-            }
-
-            if (fps >= 50) {
-                return YELLOW;
-            }
-
+            if (fps >= 100) return GREEN;
+            if (fps >= 50) return YELLOW;
             return RED;
         }
 
         private int pingColor(int ping) {
-            if (ping <= 80) {
-                return GREEN;
-            }
-
-            if (ping <= 150) {
-                return YELLOW;
-            }
-
+            if (ping <= 80) return GREEN;
+            if (ping <= 150) return YELLOW;
             return RED;
         }
     }
 
     /**
-     * Тёмное меню End Visuals с фиолетовыми переключателями.
+     * Меню End Visuals.
      *
-     * Открывается на правый Shift. Пока управляет только уже
-     * реализованными HUD-функциями.
+     * Левая кнопка по названию или переключателю включает модуль.
+     * Кнопки «-» и «+» меняют его размер.
      */
     public static final class EndVisualsScreen extends Screen {
         private static final int DIM = 0xA0000000;
@@ -502,9 +646,19 @@ public final class ExampleMod {
         private static final int TAB_HUD = 1;
         private static final int TAB_UTILITIES = 2;
 
-        private final HudSettings settings;
+        private static final String[] NAMES = {
+                "FPS / Ping",
+                "CPS Counter",
+                "Keystrokes",
+                "Coordinates",
+                "Armor HUD",
+                "Potion HUD",
+                "Crosshair"
+        };
 
-        // Сначала открываем HUD, потому что существующие функции находятся там.
+        private final HudSettings settings;
+        private final ItemStack star = new ItemStack(Items.NETHER_STAR);
+
         private int selectedTab = TAB_HUD;
 
         public EndVisualsScreen(HudSettings settings) {
@@ -537,35 +691,46 @@ public final class ExampleMod {
 
             graphics.fill(0, 0, width, height, DIM);
 
-            graphics.fill(
+            roundedRect(
+                    graphics,
                     x - 1,
                     y - 1,
-                    x + w + 1,
-                    y + PANEL_HEIGHT + 1,
+                    w + 2,
+                    PANEL_HEIGHT + 2,
+                    7,
                     PANEL_BORDER
             );
 
-            graphics.fill(
+            roundedRect(
+                    graphics,
                     x,
                     y,
-                    x + w,
-                    y + PANEL_HEIGHT,
+                    w,
+                    PANEL_HEIGHT,
+                    6,
                     PANEL
             );
 
-            graphics.fill(
+            roundedRect(
+                    graphics,
                     x,
                     y,
+                    w,
+                    HEADER_HEIGHT,
+                    6,
+                    TOP_BAR
+            );
+
+            // Закрываем нижние скругления верхней полосы.
+            graphics.fill(
+                    x,
+                    y + HEADER_HEIGHT - 6,
                     x + w,
                     y + HEADER_HEIGHT,
                     TOP_BAR
             );
 
-            graphics.renderItem(
-                    new ItemStack(Items.NETHER_STAR),
-                    x + 12,
-                    y + 12
-            );
+            graphics.renderItem(star, x + 12, y + 12);
 
             graphics.drawString(
                     font,
@@ -588,33 +753,21 @@ public final class ExampleMod {
             int tabStartX = x + 130;
 
             drawTab(
-                    graphics,
-                    "Visuals",
-                    tabStartX,
-                    y + 14,
-                    TAB_VISUALS,
-                    mouseX,
-                    mouseY
+                    graphics, "Visuals",
+                    tabStartX, y + 14,
+                    TAB_VISUALS, mouseX, mouseY
             );
 
             drawTab(
-                    graphics,
-                    "HUD",
-                    tabStartX + 58,
-                    y + 14,
-                    TAB_HUD,
-                    mouseX,
-                    mouseY
+                    graphics, "HUD",
+                    tabStartX + 58, y + 14,
+                    TAB_HUD, mouseX, mouseY
             );
 
             drawTab(
-                    graphics,
-                    "Utilities",
-                    tabStartX + 102,
-                    y + 14,
-                    TAB_UTILITIES,
-                    mouseX,
-                    mouseY
+                    graphics, "Utilities",
+                    tabStartX + 102, y + 14,
+                    TAB_UTILITIES, mouseX, mouseY
             );
 
             graphics.fill(
@@ -626,15 +779,26 @@ public final class ExampleMod {
             );
 
             if (selectedTab == TAB_HUD) {
-                drawHudCards(graphics, mouseX, mouseY);
+                drawCategory(graphics, mouseX, mouseY, 0, 6, "HUD MODULES");
+            } else if (selectedTab == TAB_VISUALS) {
+                drawCategory(graphics, mouseX, mouseY, 6, 7, "VISUALS");
             } else {
                 drawEmptyCategory(graphics);
             }
 
             graphics.drawString(
                     font,
-                    "RIGHT SHIFT / ESC  -  Close",
+                    "RSHIFT / ESC: close",
                     x + 14,
+                    y + PANEL_HEIGHT - 18,
+                    TEXT_MUTED,
+                    false
+            );
+
+            graphics.drawString(
+                    font,
+                    "- / +: size",
+                    x + w - 78,
                     y + PANEL_HEIGHT - 18,
                     TEXT_MUTED,
                     false
@@ -651,6 +815,7 @@ public final class ExampleMod {
                 int mouseY
         ) {
             boolean selected = selectedTab == tab;
+
             boolean hovered = isInside(
                     mouseX,
                     mouseY,
@@ -677,104 +842,64 @@ public final class ExampleMod {
             }
         }
 
-        private void drawHudCards(
+        private void drawCategory(
                 GuiGraphics graphics,
                 int mouseX,
-                int mouseY
+                int mouseY,
+                int start,
+                int end,
+                String title
         ) {
             int x = panelX();
             int y = panelY();
-            int w = panelWidth();
 
             graphics.drawString(
                     font,
-                    "HUD MODULES",
+                    title,
                     x + 14,
                     y + 54,
                     TEXT_MUTED,
                     false
             );
 
-            int gap = 8;
-            int cardX = x + 14;
-            int cardY = y + 72;
-            int availableWidth = w - 28;
-
+            int availableWidth = panelWidth() - 28;
             boolean twoColumns = availableWidth >= 300;
+            int gap = 8;
+
             int cardWidth = twoColumns
                     ? (availableWidth - gap) / 2
                     : availableWidth;
 
-            drawCard(
-                    graphics,
-                    "FPS / Ping",
-                    "Frame rate and latency",
-                    cardX,
-                    cardY,
-                    cardWidth,
-                    settings.fpsPing,
-                    mouseX,
-                    mouseY
-            );
+            for (int id = start; id < end; id++) {
+                int index = id - start;
+                int column = twoColumns ? index % 2 : 0;
+                int row = twoColumns ? index / 2 : index;
 
-            int secondX = twoColumns
-                    ? cardX + cardWidth + gap
-                    : cardX;
+                int cardX = x + 14 + column * (cardWidth + gap);
+                int cardY = y + 72 + row * 48;
 
-            int secondY = twoColumns
-                    ? cardY
-                    : cardY + 42;
-
-            drawCard(
-                    graphics,
-                    "CPS Counter",
-                    "Mouse clicks per second",
-                    secondX,
-                    secondY,
-                    cardWidth,
-                    settings.cps,
-                    mouseX,
-                    mouseY
-            );
-
-            int thirdY = twoColumns
-                    ? cardY + 42
-                    : cardY + 84;
-
-            drawCard(
-                    graphics,
-                    "Keystrokes",
-                    "Movement and mouse keys",
-                    cardX,
-                    thirdY,
-                    cardWidth,
-                    settings.keystrokes,
-                    mouseX,
-                    mouseY
-            );
-
-            graphics.drawString(
-                    font,
-                    "Click a card to toggle it.",
-                    cardX,
-                    y + 220,
-                    TEXT_MUTED,
-                    false
-            );
+                drawCard(
+                        graphics,
+                        id,
+                        cardX,
+                        cardY,
+                        cardWidth,
+                        mouseX,
+                        mouseY
+                );
+            }
         }
 
         private void drawCard(
                 GuiGraphics graphics,
-                String name,
-                String description,
+                int id,
                 int x,
                 int y,
                 int cardWidth,
-                boolean enabled,
                 int mouseX,
                 int mouseY
         ) {
-            int cardHeight = 34;
+            int cardHeight = 40;
 
             boolean hovered = isInside(
                     mouseX,
@@ -785,68 +910,83 @@ public final class ExampleMod {
                     cardHeight
             );
 
-            graphics.fill(
+            roundedRect(
+                    graphics,
                     x,
                     y,
-                    x + cardWidth,
-                    y + cardHeight,
+                    cardWidth,
+                    cardHeight,
+                    4,
                     hovered ? CARD_HOVER : CARD
             );
 
             graphics.drawString(
                     font,
-                    name,
-                    x + 10,
+                    NAMES[id],
+                    x + 8,
                     y + 6,
                     TEXT,
-                    false
-            );
-
-            int maxTextWidth = Math.max(0, cardWidth - 42);
-            String trimmedDescription = trimToWidth(description, maxTextWidth);
-
-            graphics.drawString(
-                    font,
-                    trimmedDescription,
-                    x + 10,
-                    y + 19,
-                    TEXT_MUTED,
                     false
             );
 
             drawSwitch(
                     graphics,
                     x + cardWidth - 29,
-                    y + 11,
-                    enabled
+                    y + 5,
+                    settings.isEnabled(id)
+            );
+
+            graphics.drawString(
+                    font,
+                    "Size",
+                    x + 8,
+                    y + 25,
+                    TEXT_MUTED,
+                    false
+            );
+
+            int minusX = x + cardWidth - 78;
+            int plusX = x + cardWidth - 22;
+
+            drawSmallButton(graphics, "-", minusX, y + 22);
+            drawSmallButton(graphics, "+", plusX, y + 22);
+
+            String value = settings.getScale(id) + "%";
+
+            graphics.drawString(
+                    font,
+                    value,
+                    minusX + 16,
+                    y + 25,
+                    ACCENT_LIGHT,
+                    false
             );
         }
 
-        private String trimToWidth(String text, int maxWidth) {
-            if (font.width(text) <= maxWidth) {
-                return text;
-            }
+        private void drawSmallButton(
+                GuiGraphics graphics,
+                String text,
+                int x,
+                int y
+        ) {
+            roundedRect(
+                    graphics,
+                    x,
+                    y,
+                    14,
+                    14,
+                    3,
+                    0xFF393044
+            );
 
-            String ellipsis = "...";
-            int ellipsisWidth = font.width(ellipsis);
-
-            if (maxWidth <= ellipsisWidth) {
-                return "";
-            }
-
-            StringBuilder builder = new StringBuilder();
-
-            for (int i = 0; i < text.length(); i++) {
-                String next = builder.toString() + text.charAt(i);
-
-                if (font.width(next) + ellipsisWidth > maxWidth) {
-                    break;
-                }
-
-                builder.append(text.charAt(i));
-            }
-
-            return builder + ellipsis;
+            graphics.drawString(
+                    font,
+                    text,
+                    x + (14 - font.width(text)) / 2,
+                    y + 3,
+                    WHITE,
+                    false
+            );
         }
 
         private void drawSwitch(
@@ -858,24 +998,17 @@ public final class ExampleMod {
             int trackColor = enabled ? ACCENT : SWITCH_OFF;
             int knobColor = enabled ? WHITE : SWITCH_KNOB_OFF;
 
-            graphics.fill(x + 2, y, x + 19, y + 12, trackColor);
-            graphics.fill(x, y + 2, x + 21, y + 10, trackColor);
+            roundedRect(graphics, x, y, 21, 12, 5, trackColor);
 
-            int knobX = enabled ? x + 12 : x + 2;
+            int knobX = enabled ? x + 11 : x + 2;
 
-            graphics.fill(
-                    knobX + 1,
-                    y + 2,
-                    knobX + 7,
-                    y + 10,
-                    knobColor
-            );
-
-            graphics.fill(
+            roundedRect(
+                    graphics,
                     knobX,
-                    y + 3,
-                    knobX + 8,
-                    y + 9,
+                    y + 2,
+                    8,
+                    8,
+                    3,
                     knobColor
             );
         }
@@ -884,13 +1017,9 @@ public final class ExampleMod {
             int x = panelX();
             int y = panelY();
 
-            String title = selectedTab == TAB_VISUALS
-                    ? "VISUALS"
-                    : "UTILITIES";
-
             graphics.drawString(
                     font,
-                    title,
+                    "UTILITIES",
                     x + 14,
                     y + 54,
                     TEXT_MUTED,
@@ -905,19 +1034,71 @@ public final class ExampleMod {
                     TEXT,
                     false
             );
+        }
 
-            graphics.drawString(
-                    font,
-                    "This category is not implemented yet.",
-                    x + 14,
-                    y + 93,
-                    TEXT_MUTED,
-                    false
+        /**
+         * Рисует скруглённый прямоугольник горизонтальными полосами.
+         * Используются только GuiGraphics.fill, без отдельных текстур.
+         */
+        private void roundedRect(
+                GuiGraphics graphics,
+                int x,
+                int y,
+                int rectWidth,
+                int rectHeight,
+                int radius,
+                int color
+        ) {
+            if (rectWidth <= 0 || rectHeight <= 0) {
+                return;
+            }
+
+            int r = Math.min(
+                    radius,
+                    Math.min(rectWidth / 2, rectHeight / 2)
             );
+
+            if (r <= 0) {
+                graphics.fill(
+                        x, y,
+                        x + rectWidth,
+                        y + rectHeight,
+                        color
+                );
+                return;
+            }
+
+            for (int row = 0; row < rectHeight; row++) {
+                int inset = 0;
+
+                if (row < r) {
+                    double dy = r - row - 0.5;
+                    inset = (int) Math.ceil(
+                            r - Math.sqrt(r * r - dy * dy)
+                    );
+                } else if (row >= rectHeight - r) {
+                    double dy = row - (rectHeight - r) + 0.5;
+                    inset = (int) Math.ceil(
+                            r - Math.sqrt(r * r - dy * dy)
+                    );
+                }
+
+                graphics.fill(
+                        x + inset,
+                        y + row,
+                        x + rectWidth - inset,
+                        y + row + 1,
+                        color
+                );
+            }
         }
 
         @Override
-        public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        public boolean mouseClicked(
+                double mouseX,
+                double mouseY,
+                int button
+        ) {
             if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
                 return super.mouseClicked(mouseX, mouseY, button);
             }
@@ -941,55 +1122,66 @@ public final class ExampleMod {
                 return true;
             }
 
-            if (selectedTab != TAB_HUD) {
+            int start;
+            int end;
+
+            if (selectedTab == TAB_HUD) {
+                start = 0;
+                end = 6;
+            } else if (selectedTab == TAB_VISUALS) {
+                start = 6;
+                end = 7;
+            } else {
                 return super.mouseClicked(mouseX, mouseY, button);
             }
 
-            int gap = 8;
-            int cardX = x + 14;
-            int cardY = y + 72;
             int availableWidth = panelWidth() - 28;
-
             boolean twoColumns = availableWidth >= 300;
+            int gap = 8;
+
             int cardWidth = twoColumns
                     ? (availableWidth - gap) / 2
                     : availableWidth;
 
-            int secondX = twoColumns
-                    ? cardX + cardWidth + gap
-                    : cardX;
+            for (int id = start; id < end; id++) {
+                int index = id - start;
+                int column = twoColumns ? index % 2 : 0;
+                int row = twoColumns ? index / 2 : index;
 
-            int secondY = twoColumns
-                    ? cardY
-                    : cardY + 42;
+                int cardX = x + 14 + column * (cardWidth + gap);
+                int cardY = y + 72 + row * 48;
 
-            int thirdY = twoColumns
-                    ? cardY + 42
-                    : cardY + 84;
+                int minusX = cardX + cardWidth - 78;
+                int plusX = cardX + cardWidth - 22;
 
-            if (isInside(mouseX, mouseY, cardX, cardY, cardWidth, 34)) {
-                settings.fpsPing = !settings.fpsPing;
-                ConfigManager.save(settings);
-                return true;
-            }
+                if (isInside(mouseX, mouseY, minusX, cardY + 22, 14, 14)) {
+                    settings.setScale(id, settings.getScale(id) - 10);
+                    ConfigManager.save(settings);
+                    return true;
+                }
 
-            if (isInside(mouseX, mouseY, secondX, secondY, cardWidth, 34)) {
-                settings.cps = !settings.cps;
-                ConfigManager.save(settings);
-                return true;
-            }
+                if (isInside(mouseX, mouseY, plusX, cardY + 22, 14, 14)) {
+                    settings.setScale(id, settings.getScale(id) + 10);
+                    ConfigManager.save(settings);
+                    return true;
+                }
 
-            if (isInside(mouseX, mouseY, cardX, thirdY, cardWidth, 34)) {
-                settings.keystrokes = !settings.keystrokes;
-                ConfigManager.save(settings);
-                return true;
+                if (isInside(mouseX, mouseY, cardX, cardY, cardWidth, 20)) {
+                    settings.setEnabled(id, !settings.isEnabled(id));
+                    ConfigManager.save(settings);
+                    return true;
+                }
             }
 
             return super.mouseClicked(mouseX, mouseY, button);
         }
 
         @Override
-        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        public boolean keyPressed(
+                int keyCode,
+                int scanCode,
+                int modifiers
+        ) {
             if (keyCode == GLFW.GLFW_KEY_RIGHT_SHIFT) {
                 onClose();
                 return true;
