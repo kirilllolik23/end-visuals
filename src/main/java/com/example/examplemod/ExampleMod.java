@@ -39,12 +39,17 @@ public final class ExampleMod {
     public ExampleMod() {
         if (FMLEnvironment.dist == Dist.CLIENT) {
             ClientHud hud = new ClientHud();
+            ExtraHud extraHud = new ExtraHud();
 
             MinecraftForge.EVENT_BUS.register(hud);
 
             FMLJavaModLoadingContext.get()
                     .getModEventBus()
                     .addListener(hud::onAddGuiLayers);
+
+            FMLJavaModLoadingContext.get()
+                    .getModEventBus()
+                    .addListener(extraHud::onAddGuiLayers);
         }
     }
 
