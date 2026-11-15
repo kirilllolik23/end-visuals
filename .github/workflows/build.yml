@@ -28,22 +28,28 @@ jobs:
       - name: Build
         run: ./gradlew build --no-daemon
 
-      - name: Find Forge GUI events
+      - name: Inspect Forge GUI source
         if: always()
         shell: bash
         run: |
-          echo "Searching Forge and generated Minecraft jars..."
+          SOURCE_JAR=".gradle/mavenizer/repo/net/minecraftforge/forge/1.21.4-54.1.22/forge-1.21.4-54.1.22-sources.jar"
 
-          find .gradle "$HOME/.gradle/caches" \
-            -type f -name '*.jar' -print0 2>/dev/null |
-          while IFS= read -r -d '' jar; do
-            matches=$(unzip -Z1 "$jar" 2>/dev/null |
-              grep -E '^net/minecraftforge/client/event/[^/]*(Gui|Overlay)[^/]*\.(class|java)$' |
-              head -100 || true)
+          if [ ! -f "$SOURCE_JAR" ]; then
+            echo "Forge sources jar not found: $SOURCE_JAR"
+            exit 1
+          fi
 
-            if [ -n "$matches" ]; then
-              echo ""
-              echo "=== $jar ==="
-              echo "$matches"
-            fi
+          for file in \
+            net/minecraftforge/client/event/RenderGuiEvent.java \
+            net/minecraftforge/client/event/AddGuiOverlayLayersEvent.java \
+            net/minecraftforge/client/event/RegisterGuiOverlaysEvent.java
+          do
+            echo ""
+            echo "========== $file =========="
+            unzip -p "$SOURCE_JAR" "$file" || true
           done
+
+          echo ""
+          echo "========== GUI overlay source files =========="
+          unzip -Z1 "$SOURCE_JAR" |
+            grep -Ei 'net/minecraftforge/client/.*(GuiOverlay|OverlayLayer).*\.java$' || true
