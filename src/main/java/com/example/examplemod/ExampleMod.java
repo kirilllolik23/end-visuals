@@ -1,16 +1,17 @@
 package com.example.examplemod;
 
-import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.AddGuiOverlayLayersEvent;
+import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.client.event.InputEvent;
-import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 import org.lwjgl.glfw.GLFW;
 
@@ -22,9 +23,16 @@ public final class ExampleMod {
     public static final String MOD_ID = "examplemod";
 
     public ExampleMod() {
-        // Клиентские классы и обработчики регистрируются только на клиенте.
         if (FMLEnvironment.dist == Dist.CLIENT) {
-            MinecraftForge.EVENT_BUS.register(new ClientHud());
+            ClientHud hud = new ClientHud();
+
+            // Клики и тики приходят на общую шину Forge.
+            MinecraftForge.EVENT_BUS.register(hud);
+
+            // Регистрация слоя HUD происходит на шине мода.
+            FMLJavaModLoadingContext.get()
+                    .getModEventBus()
+                    .addListener(hud::onAddGuiLayers);
         }
     }
 
@@ -48,6 +56,19 @@ public final class ExampleMod {
         private static final int KEY_IDLE = 0xA0303030;
         private static final int KEY_PRESSED = 0xB0EEEEEE;
         private static final int KEY_TEXT_PRESSED = 0xFF101010;
+
+        /**
+         * Добавляет наш HUD как слой поверх существующих слоёв интерфейса.
+         */
+        public void onAddGuiLayers(AddGuiOverlayLayersEvent event) {
+            event.getLayeredDraw().add(
+                    ResourceLocation.fromNamespaceAndPath(
+                            ExampleMod.MOD_ID,
+                            "client_hud"
+                    ),
+                    (graphics, deltaTracker) -> renderHud(graphics)
+            );
+        }
 
         /**
          * Считаем реальные нажатия мыши, а не количество атак,
@@ -94,15 +115,15 @@ public final class ExampleMod {
             }
         }
 
-        @SubscribeEvent
-        public void onRenderGui(RenderGuiEvent.Post event) {
+        /**
+         * Рисует временные HUD-элементы.
+         */
+        private void renderHud(GuiGraphics graphics) {
             Minecraft mc = Minecraft.getInstance();
 
             if (mc.player == null || mc.options.hideGui) {
                 return;
             }
-
-            GuiGraphics graphics = event.getGuiGraphics();
 
             drawStats(graphics, mc, 8, 8);
             drawKeystrokes(graphics, mc, 8, 50);
