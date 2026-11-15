@@ -28,7 +28,7 @@ jobs:
       - name: Build
         run: ./gradlew build --no-daemon
 
-      - name: Inspect Forge GUI source
+      - name: Inspect layered HUD API
         if: always()
         shell: bash
         run: |
@@ -39,17 +39,28 @@ jobs:
             exit 1
           fi
 
-          for file in \
-            net/minecraftforge/client/event/RenderGuiEvent.java \
-            net/minecraftforge/client/event/AddGuiOverlayLayersEvent.java \
-            net/minecraftforge/client/event/RegisterGuiOverlaysEvent.java
-          do
+          echo "========== AddGuiOverlayLayersEvent.java =========="
+          unzip -p "$SOURCE_JAR" \
+            net/minecraftforge/client/event/AddGuiOverlayLayersEvent.java
+
+          echo ""
+          echo "========== ForgeLayeredDraw source =========="
+
+          mapfile -t matches < <(
+            unzip -Z1 "$SOURCE_JAR" |
+              grep -E '(^|/)ForgeLayeredDraw\.java$' || true
+          )
+
+          if [ "${#matches[@]}" -eq 0 ]; then
+            echo "ForgeLayeredDraw.java not found in sources jar"
+          fi
+
+          for file in "${matches[@]}"; do
             echo ""
             echo "========== $file =========="
-            unzip -p "$SOURCE_JAR" "$file" || true
+            unzip -p "$SOURCE_JAR" "$file"
           done
 
           echo ""
-          echo "========== GUI overlay source files =========="
-          unzip -Z1 "$SOURCE_JAR" |
-            grep -Ei 'net/minecraftforge/client/.*(GuiOverlay|OverlayLayer).*\.java$' || true
+          echo "========== ExampleMod.java =========="
+          cat src/main/java/com/example/examplemod/ExampleMod.java
