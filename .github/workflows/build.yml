@@ -35,8 +35,9 @@ jobs:
           path: |
             build/libs/*.jar
             !build/libs/*-sources.jar
+          if-no-files-found: error
 
-      - name: Inspect layered HUD API
+      - name: Inspect fire and hit hooks
         if: always()
         shell: bash
         run: |
@@ -47,28 +48,23 @@ jobs:
             exit 1
           fi
 
-          echo "========== AddGuiOverlayLayersEvent.java =========="
-          unzip -p "$SOURCE_JAR" \
-            net/minecraftforge/client/event/AddGuiOverlayLayersEvent.java
-
-          echo ""
-          echo "========== ForgeLayeredDraw source =========="
-
-          mapfile -t matches < <(
-            unzip -Z1 "$SOURCE_JAR" |
-              grep -E '(^|/)ForgeLayeredDraw\.java$' || true
-          )
-
-          if [ "${#matches[@]}" -eq 0 ]; then
-            echo "ForgeLayeredDraw.java not found in sources jar"
-          fi
-
-          for file in "${matches[@]}"; do
+          for file in \
+            net/minecraftforge/client/event/RenderBlockScreenEffectEvent.java \
+            net/minecraftforge/event/entity/player/AttackEntityEvent.java
+          do
             echo ""
             echo "========== $file =========="
-            unzip -p "$SOURCE_JAR" "$file"
+            unzip -p "$SOURCE_JAR" "$file" || true
           done
 
           echo ""
-          echo "========== ExampleMod.java =========="
-          cat src/main/java/com/example/examplemod/ExampleMod.java
+          echo "========== Compiled fire and attack event classes =========="
+
+          FORGE_JAR=".gradle/mavenizer/repo/net/minecraftforge/forge/1.21.4-54.1.22/forge-1.21.4-54.1.22.jar"
+
+          if [ -f "$FORGE_JAR" ]; then
+            unzip -Z1 "$FORGE_JAR" |
+              grep -E '(RenderBlockScreenEffectEvent|AttackEntityEvent).*\.class$' || true
+          else
+            echo "Forge binary jar not found: $FORGE_JAR"
+          fi
